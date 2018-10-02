@@ -4,6 +4,8 @@
 #include "Load.hpp"
 #include "MeshBuffer.hpp"
 #include "Scene.hpp"
+#include "Sound.hpp"
+#include <unistd.h>
 #include "gl_errors.hpp" //helper for dumpping OpenGL error messages
 #include "check_fb.hpp" //helper for checking currently bound OpenGL framebuffer
 #include "read_chunk.hpp" //helper for reading a vector of structures from a file
@@ -22,9 +24,14 @@
 #include <cstddef>
 #include <random>
 
-
+/*
 Load< MeshBuffer > meshes(LoadTagDefault, [](){
 	return new MeshBuffer(data_path("vignette.pnct"));
+});
+*/
+
+Load< MeshBuffer > meshes(LoadTagDefault, [](){
+	return new MeshBuffer(data_path("bloom.pnct"));
 });
 
 Load< GLuint > meshes_for_texture_program(LoadTagDefault, [](){
@@ -34,6 +41,122 @@ Load< GLuint > meshes_for_texture_program(LoadTagDefault, [](){
 Load< GLuint > meshes_for_depth_program(LoadTagDefault, [](){
 	return new GLuint(meshes->make_vao_for_program(depth_program->program));
 });
+
+Load< Sound::Sample > topChime(LoadTagDefault, [](){
+	return new Sound::Sample(data_path("topChime.wav"));
+});
+Load< Sound::Sample > bottomChime(LoadTagDefault, [](){
+	return new Sound::Sample(data_path("bottomChime.wav"));
+});
+Load< Sound::Sample > rightChime(LoadTagDefault, [](){
+	return new Sound::Sample(data_path("rightChime.wav"));
+});
+Load< Sound::Sample > leftChime(LoadTagDefault, [](){
+	return new Sound::Sample(data_path("leftChime.wav"));
+});
+
+//used for fullscreen passes:
+Load< GLuint > empty_vao(LoadTagDefault, [](){
+	GLuint vao = 0;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+	glBindVertexArray(0);
+	return new GLuint(vao);
+});
+
+
+Load< GLuint > blur_program(LoadTagDefault, [](){
+	GLuint program = compile_program(
+		//this draws a triangle that covers the entire screen:
+		"#version 330\n"
+		"void main() {\n"
+		"	gl_Position = vec4(4 * (gl_VertexID & 1) - 1,  2 * (gl_VertexID & 2) - 1, 0.0, 1.0);\n"
+		"}\n"
+		,
+		//NOTE on reading screen texture:
+		//texelFetch() gives direct pixel access with integer coordinates, but accessing out-of-bounds pixel is undefined:
+		//	vec4 color = texelFetch(tex, ivec2(gl_FragCoord.xy), 0);
+		//texture() requires using [0,1] coordinates, but handles out-of-bounds more gracefully (using wrap settings of underlying texture):
+		//	vec4 color = texture(tex, gl_FragCoord.xy / textureSize(tex,0));
+
+		"#version 330\n"
+		"uniform sampler2D tex;\n"
+		"out vec4 fragColor;\n"
+		"void main() {\n"
+		"	vec2 at = (gl_FragCoord.xy - 0.5 * textureSize(tex, 0)) / textureSize(tex, 0).y;\n"
+		//make blur amount more near the edges and less in the middle:
+		"	float amt = (0.01 * textureSize(tex,0).y) * max(0.0,(length(at) - 0.3)/0.2);\n"
+		//pick a vector to move in for blur using function inspired by:
+		//https://stackoverflow.com/questions/12964279/whats-the-origin-of-this-glsl-rand-one-liner
+		"	vec2 ofs = amt * normalize(vec2(\n"
+		"		fract(dot(gl_FragCoord.xy ,vec2(12.9898,78.233))),\n"
+		"		fract(dot(gl_FragCoord.xy ,vec2(96.3869,-27.5796)))\n"
+		"	));\n"
+		//do a four-pixel average to blur:
+		"	vec4 blur =\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(ofs.x,ofs.y)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(-ofs.y,ofs.x)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(-ofs.x,-ofs.y)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(ofs.y,-ofs.x)) / textureSize(tex, 0))\n"
+		"	;\n"
+		"	fragColor = vec4(blur.rgb, 1.0);\n" //blur;\n"
+		"}\n"
+	);
+	glUseProgram(program);
+	glUniform1i(glGetUniformLocation(program, "tex"), 0);
+	glUseProgram(0);
+	return new GLuint(program);
+});
+
+
+/*
+Load< GLuint > blur_program(LoadTagDefault, [](){
+	GLuint program = compile_program(
+		//this draws a triangle that covers the entire screen:
+		"#version 330\n"
+		"void main() {\n"
+		"	gl_Position = vec4(4 * (gl_VertexID & 1) - 1,  2 * (gl_VertexID & 2) - 1, 0.0, 1.0);\n"
+		"}\n"
+		,
+		//NOTE on reading screen texture:
+		//texelFetch() gives direct pixel access with integer coordinates, but accessing out-of-bounds pixel is undefined:
+		//	vec4 color = texelFetch(tex, ivec2(gl_FragCoord.xy), 0);
+		//texture() requires using [0,1] coordinates, but handles out-of-bounds more gracefully (using wrap settings of underlying texture):
+		//	vec4 color = texture(tex, gl_FragCoord.xy / textureSize(tex,0));
+
+		"#version 330\n"
+		"uniform sampler2D tex;\n"
+		"out vec4 fragColor;\n"
+		"void main() {\n"
+		"	vec2 at = (gl_FragCoord.xy - 0.5 * textureSize(tex, 0)) / textureSize(tex, 0).y;\n"
+		//make blur amount more near the edges and less in the middle:
+		"	float amt = (0.01 * textureSize(tex,0).y) * max(0.0,(length(at) - 0.3)/0.2);\n"
+		//pick a vector to move in for blur using function inspired by:
+		//https://stackoverflow.com/questions/12964279/whats-the-origin-of-this-glsl-rand-one-liner
+		"	vec2 ofs = amt * normalize(vec2(\n"
+		"		fract(dot(gl_FragCoord.xy ,vec2(12.9898,78.233))),\n"
+		"		fract(dot(gl_FragCoord.xy ,vec2(96.3869,-27.5796)))\n"
+		"	));\n"
+		//do a four-pixel average to blur:
+		"	vec4 blur =\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(ofs.x,ofs.y)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(-ofs.y,ofs.x)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(-ofs.x,-ofs.y)) / textureSize(tex, 0))\n"
+		"		+ 0.25 * texture(tex, (gl_FragCoord.xy + vec2(ofs.y,-ofs.x)) / textureSize(tex, 0))\n"
+		"	;\n"
+		"	fragColor = vec4(blur.rgb, 1.0);\n" //blur;\n"
+		"}\n"
+	);
+
+	glUseProgram(program);
+
+	glUniform1i(glGetUniformLocation(program, "tex"), 0);
+
+	glUseProgram(0);
+
+	return new GLuint(program);
+});
+*/
 
 GLuint load_texture(std::string const &filename) {
 	glm::uvec2 size;
@@ -83,6 +206,7 @@ Scene::Transform *camera_parent_transform = nullptr;
 Scene::Camera *camera = nullptr;
 Scene::Transform *spot_parent_transform = nullptr;
 Scene::Lamp *spot = nullptr;
+Scene::Object *generateSound;
 
 Load< Scene > scene(LoadTagDefault, [](){
 	Scene *ret = new Scene;
@@ -102,15 +226,17 @@ Load< Scene > scene(LoadTagDefault, [](){
 
 
 	//load transform hierarchy:
-	ret->load(data_path("vignette.scene"), [&](Scene &s, Scene::Transform *t, std::string const &m){
+	ret->load(data_path("bloom.scene"), [&](Scene &s, Scene::Transform *t, std::string const &m){
 		Scene::Object *obj = s.new_object(t);
 
 		obj->programs[Scene::Object::ProgramTypeDefault] = texture_program_info;
-		if (t->name == "Platform") {
+		if (t->name == "top") {
 			obj->programs[Scene::Object::ProgramTypeDefault].textures[0] = *wood_tex;
-		} else if (t->name == "Pedestal") {
+		}
+		else if (t->name == "bottom") {
 			obj->programs[Scene::Object::ProgramTypeDefault].textures[0] = *marble_tex;
-		} else {
+		}
+		else {
 			obj->programs[Scene::Object::ProgramTypeDefault].textures[0] = *white_tex;
 		}
 
@@ -125,6 +251,7 @@ Load< Scene > scene(LoadTagDefault, [](){
 	});
 
 	//look up camera parent transform:
+	/*
 	for (Scene::Transform *t = ret->first_transform; t != nullptr; t = t->alloc_next) {
 		if (t->name == "CameraParent") {
 			if (camera_parent_transform) throw std::runtime_error("Multiple 'CameraParent' transforms in scene.");
@@ -138,9 +265,12 @@ Load< Scene > scene(LoadTagDefault, [](){
 	}
 	if (!camera_parent_transform) throw std::runtime_error("No 'CameraParent' transform in scene.");
 	if (!spot_parent_transform) throw std::runtime_error("No 'SpotParent' transform in scene.");
-
+*/
 	//look up the camera:
 	for (Scene::Camera *c = ret->first_camera; c != nullptr; c = c->alloc_next) {
+		c->transform->position = glm::vec3(0.0f, -25.0f, 3.0f);
+		//Cameras look along -z, so rotate view to look at origin:
+		c->transform->rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 		if (c->transform->name == "Camera") {
 			if (camera) throw std::runtime_error("Multiple 'Camera' objects in scene.");
 			camera = c;
@@ -167,12 +297,41 @@ GameMode::GameMode() {
 GameMode::~GameMode() {
 }
 
+//CHANGED
 bool GameMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size) {
 	//ignore any keys that are the result of automatic key repeat:
 	if (evt.type == SDL_KEYDOWN && evt.key.repeat) {
 		return false;
 	}
+	if (evt.type == SDL_KEYDOWN && evt.key.repeat == 0) {
+		if (evt.key.keysym.scancode == SDL_SCANCODE_W) { //top box activated
+			playerOrder.push_back("top");
+			//spot->transform->position = topPos;
+			topC = topChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+			sleep(1);
+			return true;
+		}
+		else if (evt.key.keysym.scancode == SDL_SCANCODE_A) { //left box activated
+			playerOrder.push_back("left");
+			leftC = leftChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+			sleep(1);
+			return true;
+		}
+		else if (evt.key.keysym.scancode == SDL_SCANCODE_S) { //lowest box activated
+			playerOrder.push_back("bottom");
+			bottomC = bottomChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+			sleep(1);
+			return true;
+		}
+		else if (evt.key.keysym.scancode == SDL_SCANCODE_D) { //right box activated
+			playerOrder.push_back("right");
+			rightC = rightChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+			sleep(1);
+			return true;
+		}
+	}
 
+/*
 	if (evt.type == SDL_MOUSEMOTION) {
 		if (evt.motion.state & SDL_BUTTON(SDL_BUTTON_LEFT)) {
 			camera_spin += 5.0f * evt.motion.xrel / float(window_size.x);
@@ -184,13 +343,93 @@ bool GameMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 		}
 
 	}
-
+*/
 	return false;
 }
 
+bool GameMode::match(std::vector<std::string> attempt, std::vector<std::string> ref) {
+	assert(attempt.size() == ref.size());
+	for (uint32_t i=0; i<attempt.size(); i++) {
+		if (attempt[i] != ref[i]) {
+			//if so clear player's order
+			playerOrder.clear();
+			return false;
+		}
+	}
+	//clear player's order
+	playerOrder.clear();
+	return true;
+}
+
+void GameMode::playPattern(std::vector<std::string> play) {
+	for (uint32_t i=0; i<play.size(); i++) {
+		//noise and light for each
+		/*
+		std::cout << "GONNA MAKE SOUND" << std::endl;
+		std::cout << "am i null? "<< generateSound << std::endl;
+		std::cout << "my transform is  "<< generateSound->transform << std::endl;
+		assert(generateSound->transform != NULL);
+		assert(generateSound->transform->position == glm::vec3(0.0f, 0.0f, 0.0f));
+		std::cout<< "got past asserts" << std::endl;
+		glm::mat4x3 cube_to_world = generateSound->transform->make_local_to_world();
+		*/
+		if (play[i] == "top") {
+			topC = topChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+		}
+		else if (play[i] == "bottom") {
+			bottomC = bottomChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+		}
+		else if (play[i] == "left"){
+			leftC = leftChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+		}
+		else { assert(play[i] == "right");
+			rightC = rightChime->play(glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, Sound::Once);
+		}
+		sleep(1);
+		std::cout << play[i] << std::endl;
+	}
+}
+
+std::vector<std::string> newOrder(uint32_t seqLength) {
+	srand(time(NULL));
+	std::vector<std::string> newSequence;
+	std::string next;
+	for (uint32_t i=0; i<seqLength; i++) {
+		//random logic
+		uint32_t ind = rand()%4;
+		if (ind == 0) {next = "top";}
+		else if (ind == 1) {next = "bottom";}
+		else if (ind == 2) {next = "left";}
+		else {next = "right";}
+		newSequence.push_back(next);
+	}
+	return newSequence;
+}
+
+//CHANGED
 void GameMode::update(float elapsed) {
-	camera_parent_transform->rotation = glm::angleAxis(camera_spin, glm::vec3(0.0f, 0.0f, 1.0f));
-	spot_parent_transform->rotation = glm::angleAxis(spot_spin, glm::vec3(0.0f, 0.0f, 1.0f));
+	//camera_parent_transform->rotation = glm::angleAxis(camera_spin, glm::vec3(0.0f, 0.0f, 1.0f));
+	//spot_parent_transform->rotation = glm::angleAxis(spot_spin, glm::vec3(0.0f, 0.0f, 1.0f));
+	//std::cout << "null in update? "<< generateSound << std::endl;
+	//check if your pattern matches the played pattern when both lengths are the same
+	if (playerOrder.size() == correctOrder.size() and !firstRound) {
+		//if not then previous pattern plays again
+		if (!match(playerOrder, correctOrder)) {
+			playPattern(correctOrder);
+		}
+		//if yes then generate a new and longer pattern
+		else {
+			uint32_t newLen = correctOrder.size()+1;
+			correctOrder = newOrder(newLen);
+			playPattern(correctOrder);
+		}
+	}
+	if (firstRound) {
+		std::cout << "only enters once" << std::endl;
+		firstRound = false;
+		correctOrder = newOrder(1);
+		playPattern(correctOrder);
+	}
 }
 
 //GameMode will render to some offscreen framebuffer(s).
@@ -298,9 +537,9 @@ void GameMode::draw(glm::uvec2 const &drawable_size) {
 	GL_ERRORS();
 
 
-
-	//Draw scene to screen:
-	//Eventually: glBindFramebuffer(GL_FRAMEBUFFER, fbs.fb);
+	//TODO; WHEN COPYING BUFFER FROM TEXBUF TO RENDERED SCREEN CHANGE ONE COLOR CHANNEL TO MAKE SURE IT WORKED
+	//Draw scene to off-screen framebuffer:
+	glBindFramebuffer(GL_FRAMEBUFFER, fbs.fb);
 	glViewport(0,0,drawable_size.x, drawable_size.y);
 
 	camera->aspect = drawable_size.x / float(drawable_size.y);
@@ -324,12 +563,17 @@ void GameMode::draw(glm::uvec2 const &drawable_size) {
 	glUniform3fv(texture_program->sky_color_vec3, 1, glm::value_ptr(glm::vec3(0.2f, 0.2f, 0.3f)));
 	glUniform3fv(texture_program->sky_direction_vec3, 1, glm::value_ptr(glm::vec3(0.0f, 0.0f, 1.0f)));
 
-	glm::mat4 world_to_spot = glm::mat4(
-		0.5f, 0.0f, 0.0f, 0.0f,
-		0.0f, 0.5f, 0.0f, 0.0f,
-		0.0f, 0.0f, 0.5f, 0.0f,
-		0.5f, 0.5f, 0.5f+0.00001f /* <-- bias */, 1.0f
-	) * spot->make_projection() * spot->transform->make_world_to_local();
+	glm::mat4 world_to_spot =
+		//This matrix converts from the spotlight's clip space ([-1,1]^3) into depth map texture coordinates ([0,1]^2) and depth map Z values ([0,1]):
+		glm::mat4(
+			0.5f, 0.0f, 0.0f, 0.0f,
+			0.0f, 0.5f, 0.0f, 0.0f,
+			0.0f, 0.0f, 0.5f, 0.0f,
+			0.5f, 0.5f, 0.5f+0.00001f /* <-- bias */, 1.0f
+		)
+		//this is the world-to-clip matrix used when rendering the shadow map:
+		* spot->make_projection() * spot->transform->make_world_to_local();
+
 	glUniformMatrix4fv(texture_program->light_to_spot_mat4, 1, GL_FALSE, glm::value_ptr(world_to_spot));
 
 	glm::mat4 spot_to_world = spot->transform->make_local_to_world();
@@ -340,13 +584,15 @@ void GameMode::draw(glm::uvec2 const &drawable_size) {
 	glm::vec2 spot_outer_inner = glm::vec2(std::cos(0.5f * spot->fov), std::cos(0.85f * 0.5f * spot->fov));
 	glUniform2fv(texture_program->spot_outer_inner_vec2, 1, glm::value_ptr(spot_outer_inner));
 
+	//This code binds texture index 1 to the shadow map:
+	// (note that this is a bit brittle -- it depends on none of the objects in the scene having a texture of index 1 set in their material data; otherwise scene::draw would unbind this texture):
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, fbs.shadow_depth_tex);
+	//The shadow_depth_tex must have these parameters set to be used as a sampler2DShadow in the shader:
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LESS);
+	//NOTE: however, these are parameters of the texture object, not the binding point, so there is no need to set them *each frame*. I'm doing it here so that you are likely to see that they are being set.
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, fbs.shadow_color_tex);
-	//glBindTexture(GL_TEXTURE_2D, *wood_tex);
 
 	scene->draw(camera);
 
@@ -354,9 +600,20 @@ void GameMode::draw(glm::uvec2 const &drawable_size) {
 	glBindTexture(GL_TEXTURE_2D, 0);
 	glActiveTexture(GL_TEXTURE0);
 
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 	GL_ERRORS();
 
 
 	//Copy scene from color buffer to screen, performing post-processing effects:
-	//TODO
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, fbs.color_tex);
+	glUseProgram(*blur_program);
+	glBindVertexArray(*empty_vao);
+
+	glDrawArrays(GL_TRIANGLES, 0, 3);
+
+	glUseProgram(0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }

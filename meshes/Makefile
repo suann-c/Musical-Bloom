@@ -16,6 +16,9 @@ all : \
 	$(DIST)/menu.p \
 	$(DIST)/vignette.pnct \
 	$(DIST)/vignette.scene \
+	$(DIST)/bloom.pnct \
+	$(DIST)/bloom.scene \
+
 
 
 $(DIST)/%.p : %.blend export-meshes.py

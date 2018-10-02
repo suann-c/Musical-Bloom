@@ -1,11 +1,11 @@
 # Game Information
 (Note: fill in this portion with information about your game.)
 
-Title: (TODO: your game's title)
+Title: (Musical Bloom)
 
-Author: (TODO: your name)
+Author: (Suann Chi)
 
-Design Document: [TODO: name of design document](TODO: link to design document)
+Design Document: [Musical Bloom](http://graphics.cs.cmu.edu/courses/15-466-f18/game3-designs/ishmaelj/)
 
 Screen Shot:
 
@@ -13,15 +13,15 @@ Screen Shot:
 
 How To Play:
 
-TODO: describe the controls and (if needed) goals/strategy.
+Press "W/A/S/D" keys to activate top/left/bottom/right cubes. Each round the sequence to memorize will lengthen if the player gets it correct.
 
 Changes From The Design Document:
 
-TODO: what did you need to add/remove/modify from the original design? Why?
+I removed the bloom portion of the design document because I could not get it to work on time.
 
 Good / Bad / Ugly Code:
 
-TODO: provide examples of code you wrote from this project that you think is good (elegant, simple, useful), bad (hack-y, brittle, unreadable), and ugly (particularly inelegant). Provide a sentence or two of justification for the examples.
+Bad: Hacky code includes the time buffer after a sound has started playing, I used sleep(time in seconds) to accomplish this. This was done to make sure sounds did not play on top of each other.
 
 # Using This Base Code
 
